@@ -1,0 +1,10 @@
+vendor/
+.build/
+*.tgz
+*.tar.gz
+*.zip
+
+# artefak rilis dibangun otomatis oleh workflow release — jangan di-track
+dist/
+dist-e2e/
+.e2e-prefix/

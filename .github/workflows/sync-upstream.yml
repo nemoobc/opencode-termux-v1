@@ -1,0 +1,51 @@
+name: sync upstream opencode
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      synced: ${{ steps.sync.outputs.synced }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: sync
+        name: cek & sesuaikan versi upstream
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          UP=$(curl -sf https://registry.npmjs.org/opencode-ai/latest | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+          CUR=$(cat UPSTREAM)
+          echo "upstream=$UP | current=$CUR"
+          if [ "$UP" = "$CUR" ]; then
+            echo "sudah sinkron — tidak ada yang dilakukan"
+            echo "synced=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # naikkan versi paket: patch +1 (skema paket.upstream.patch)
+          NEWVER=$(python3 -c "import sys; a=sys.argv[1].split('.'); a[-1]=str(int(a[-1])+1); print('.'.join(a))" "$(cat VERSION)")
+          # anti-bentrok: versi baru harus bebas di tag lokal & remote
+          until ! git ls-remote --exit-code --tags origin "refs/tags/v$NEWVER" >/dev/null 2>&1; do
+            echo "v$NEWVER sudah terpakai (tag) — naikkan"
+            NEWVER=$(python3 -c "import sys; a=sys.argv[1].split('.'); a[-1]=str(int(a[-1])+1); print('.'.join(a))" "$NEWVER")
+          done
+          printf '%s\n' "$UP" > UPSTREAM
+          printf '%s\n' "$NEWVER" > VERSION
+          git config user.name "nemoobc"
+          git config user.email "258114617+nemoobc@users.noreply.github.com"
+          git add UPSTREAM VERSION
+          git commit -m "sync: upstream opencode $UP"
+          git tag "v$NEWVER"
+          git push
+          git push origin "v$NEWVER"
+          # GITHUB_TOKEN tidak pernah memicu workflow via push-tag (aturan anti-rekursi GitHub),
+          # jadi release dipicu eksplisit via workflow_dispatch (pengecualian resmi).
+          gh workflow run release.yml --ref "v$NEWVER"
+          echo "tag v$NEWVER didorong + release.yml di-dispatch -> 5 artefak dibangun"
+          echo "synced=true" >> "$GITHUB_OUTPUT"

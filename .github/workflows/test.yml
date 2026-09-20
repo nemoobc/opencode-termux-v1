@@ -1,0 +1,35 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: struktur + unit test (sh murni)
+        run: sh test/run.sh
+
+  e2e-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: e2e penuh x64 (build bundle + install + smoke test + subcommand)
+        env: { OCX_E2E: "1" }
+        run: sh test/run.sh
+
+  e2e-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: e2e arm64 native (build bundle arm64 + install + smoke via container Alpine)
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/w -w /w \
+            -e HOME=/tmp \
+            alpine:3.20 \
+            sh -c "apk add --no-cache bash curl tar zip >/dev/null 2>&1; bash scripts/build-release.sh dist-e2e >/dev/null 2>&1 && OCX_LIBDIR=/tmp/ocx-lib OCX_BINDIR=/tmp/ocx-bin sh dist-e2e/opencode-termux-installer.sh >/dev/null 2>&1 && /tmp/ocx-bin/opencode-termux --version"

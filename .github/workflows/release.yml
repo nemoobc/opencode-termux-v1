@@ -1,0 +1,29 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: rakit 5 artefak (tanpa npm)
+        run: bash scripts/build-release.sh dist
+      - name: unggah ke GitHub Releases
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+        run: |
+          VER=$(cat VERSION)
+          TAG="v$VER"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            echo "aset diperbarui pada rilis $TAG"
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+            echo "rilis $TAG dibuat dengan $(ls dist | wc -l) aset"
+          fi

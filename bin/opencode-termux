@@ -1,0 +1,89 @@
+#!/bin/sh
+# opencode-termux v1 — wrapper sh murni (tanpa Node/npm).
+# Dipasang installer sebagai symlink: $BINDIR/opencode-termux → $LIBDIR/bin/opencode-termux
+# (wrapper tahu lokasi bundle-nya sendiri via dirname).
+
+# resolve symlink (wrapper dipasang sebagai symlink di $BINDIR)
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK=$(readlink "$SELF")
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+HERE=$(cd "$(dirname "$SELF")" && pwd)
+LIBDIR=$(dirname "$HERE")
+BIN="$LIBDIR/vendor/opencode"
+VERSION="@VERSION@"
+UPSTREAM="@UPSTREAM@"
+PREFIX="${TERMUX_PREFIX:-/data/data/com.termux/files/usr}"
+
+# cleanEnv: LD_PRELOAD bawaan Termux (libtermux-exec) dibuat untuk Bionic —
+# gagal relokasi jika ikut dimuat ke proses musl. Selalu bersihkan.
+unset LD_PRELOAD LD_PRELOAD_32BIT
+
+# ensureTmp: /tmp di Termux read-only — pakai $PREFIX/tmp
+TMPDIR="${TMPDIR:-$PREFIX/tmp}"
+mkdir -p "$TMPDIR" 2>/dev/null || true
+export TMPDIR
+
+# ensureDns: resolv.conf & hosts bisa ditulis tanpa root
+mkdir -p "$PREFIX/etc" 2>/dev/null || true
+[ -f "$PREFIX/etc/resolv.conf" ] || printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$PREFIX/etc/resolv.conf" 2>/dev/null || true
+[ -f "$PREFIX/etc/hosts" ] || printf '127.0.0.1 localhost\n' > "$PREFIX/etc/hosts" 2>/dev/null || true
+
+say() { printf '[opencode-termux] %s\n' "$*"; }
+die() { printf '[opencode-termux] ❌ %s\n' "$*" >&2; exit 1; }
+
+case "${1:-}" in
+  version)
+    if [ -x "$BIN" ]; then BINVER=$("$LIBDIR/vendor/ld-musl.so" "$BIN" --version 2>/dev/null | tr -d '\n'); else BINVER="(belum terpasang)"; fi
+    echo "opencode-termux v$VERSION (upstream opencode $UPSTREAM, binary $BINVER)"
+    exit 0
+    ;;
+  doctor)
+    critical=0
+    cek() { # cek <nama> <cmd...>
+      name=$1; shift
+      if "$@" >/dev/null 2>&1; then say "✅ $name"; else say "❌ $name"; critical=$((critical+1)); fi
+    }
+    cek "binary opencode" "$LIBDIR/vendor/ld-musl.so" "$BIN" --version
+    cek "vendor lengkap" test -f "$LIBDIR/vendor/ld-musl.so"
+    cek "tar tersedia" tar --version
+    cek "jaringan registry npm" curl -fsSL https://registry.npmjs.org/-/ping
+    if [ "$critical" -eq 0 ]; then say "✅ semua komponen kritis sehat"; exit 0
+    else say "❌ $critical masalah kritis"; exit 1; fi
+    ;;
+  update)
+    say "memperbarui bundle (paket v$VERSION)…"
+    "$LIBDIR/scripts/installer.sh" || die "update gagal"
+    say "✅ update selesai."
+    exit 0
+    ;;
+  help|--help|-h)
+    echo "opencode-termux v$VERSION
+pakai:
+  opencode-termux                 jalankan CLI opencode (argumen diteruskan)
+  opencode-termux update          perbarui binary ke upstream terbaru
+  opencode-termux doctor          diagnosis lingkungan & bundle
+  opencode-termux version         info versi paket + binary"
+    exit 0
+    ;;
+esac
+
+# Auto-stop server: kalau TUI yang memulai server, exit = server ikut mati.
+# Kalau server sudah jalan duluan, biarkan (jangan bunuh sesi lain).
+interactive=0
+[ $# -eq 0 ] && interactive=1
+server_was_running=0
+if [ "$interactive" = 1 ]; then
+  st=$("$LIBDIR/vendor/ld-musl.so" "$BIN" service status 2>/dev/null | tr -d '\n')
+  [ -n "$st" ] && [ "$st" != "stopped" ] && server_was_running=1
+fi
+"$LIBDIR/vendor/ld-musl.so" "$BIN" "$@"
+rc=$?
+if [ "$interactive" = 1 ] && [ "$server_was_running" = 0 ]; then
+  "$LIBDIR/vendor/ld-musl.so" "$BIN" service stop >/dev/null 2>&1 || true
+fi
+exit $rc
